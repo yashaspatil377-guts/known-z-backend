@@ -1,8 +1,9 @@
 {
   "name": "knownz-backend",
   "version": "1.0.0",
-  "description": "Minimal serverless backend for Known Z — creates and verifies Razorpay orders.",
+  "description": "Serverless backend for Known Z — creates and verifies Razorpay orders, sends order emails, and tracks order status.",
   "dependencies": {
-    "razorpay": "^2.9.4"
+    "razorpay": "^2.9.4",
+    "@vercel/kv": "^1.0.1"
   }
 }
