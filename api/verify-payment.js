@@ -1,8 +1,8 @@
 // POST /api/verify-payment
-// Confirms a payment is genuine by recomputing Razorpay's signature server-side,
-// then emails you the full order details so you have an actual record to work from.
+// Confirms a payment is genuine, saves the order for tracking, and emails you the details.
 
 const crypto = require('crypto');
+const { kv } = require('@vercel/kv');
 
 module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -37,23 +37,46 @@ module.exports = async (req, res) => {
       return res.status(400).json({ verified: false });
     }
 
-    // Payment confirmed genuine. Email the order details — if this fails for any
-    // reason, we still tell the customer their payment succeeded (it did), we just
-    // log the email error so it doesn't silently vanish.
+    let orderNumber;
     try {
-      await sendOrderEmail({ razorpay_payment_id, customer, items, amount });
+      orderNumber = await kv.incr('order:counter');
+    } catch (kvErr) {
+      console.error('KV counter error:', kvErr);
+      orderNumber = Date.now();
+    }
+    const orderId = `KZ-${1000 + orderNumber}`;
+
+    const order = {
+      orderId,
+      paymentId: razorpay_payment_id,
+      status: 'Processing',
+      customer: customer || {},
+      items: items || [],
+      amount: amount || 0,
+      createdAt: new Date().toISOString()
+    };
+
+    try {
+      await kv.set(`order:${orderId}`, JSON.stringify(order));
+      await kv.lpush('order:list', orderId);
+    } catch (kvErr) {
+      console.error('KV save error:', kvErr);
+    }
+
+    try {
+      await sendOrderEmail({ orderId, razorpay_payment_id, customer, items, amount });
     } catch (emailErr) {
       console.error('Order email failed:', emailErr);
     }
 
-    return res.status(200).json({ verified: true });
+    return res.status(200).json({ verified: true, orderId });
   } catch (err) {
     console.error('verify-payment error:', err);
     res.status(500).json({ error: 'Verification failed' });
   }
 };
 
-async function sendOrderEmail({ razorpay_payment_id, customer, items, amount }) {
+async function sendOrderEmail({ orderId, razorpay_payment_id, customer, items, amount }) {
   if (!process.env.RESEND_API_KEY || !process.env.NOTIFY_EMAIL) {
     console.warn('RESEND_API_KEY or NOTIFY_EMAIL not set — skipping order email.');
     return;
@@ -64,7 +87,7 @@ async function sendOrderEmail({ razorpay_payment_id, customer, items, amount }) 
     .join('');
 
   const html = `
-    <h2>New Known Z Order</h2>
+    <h2>New Known Z Order — ${orderId}</h2>
     <p><strong>Payment ID:</strong> ${razorpay_payment_id}</p>
     <p><strong>Total:</strong> ₹${amount}</p>
 
@@ -91,7 +114,7 @@ async function sendOrderEmail({ razorpay_payment_id, customer, items, amount }) 
     body: JSON.stringify({
       from: 'Known Z Orders <onboarding@resend.dev>',
       to: [process.env.NOTIFY_EMAIL],
-      subject: `New Order — ₹${amount} from ${customer?.name || 'a customer'}`,
+      subject: `New Order ${orderId} — ₹${amount} from ${customer?.name || 'a customer'}`,
       html
     })
   });
