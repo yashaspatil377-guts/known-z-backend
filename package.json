@@ -1,0 +1,8 @@
+{
+  "name": "knownz-backend",
+  "version": "1.0.0",
+  "description": "Minimal serverless backend for Known Z — creates and verifies Razorpay orders.",
+  "dependencies": {
+    "razorpay": "^2.9.4"
+  }
+}
